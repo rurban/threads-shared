@@ -1,4 +1,4 @@
-threads/shared version 0.01
+threads/shared version 0.02
 ===========================
 
 This module needs perl 5.7.2 or later compiled with USEITHREADS, 
@@ -21,6 +21,6 @@ threads 0.03;
 
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2001 Artur Bergman artur at contiller.se
+Copyright (C) 2001 Arthur Bergman artur at contiller.se
 Same licence as perl.
 

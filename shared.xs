@@ -31,15 +31,20 @@ SV* init_shared_sv () {
 
 void shared_lock (SV* ref) {
 	shared_sv* object = GETOBJRV(ref);
+//	printf("Trying to get lock for %d\n",object);
 	if(object->owner && object->owner == SvRV(ref)) {
 		object->locks++;
+//		printf("Incrementing lock count for %d\n", object);
 		return;
 	}
+//	printf("Mutex %d\n",&object->lock);
 	MUTEX_LOCK(&object->lock);
+//	printf("Got lock\n");
 	if(object->locks != 0)
 		printf("BAD ERROR\n");
 	object->locks++;
 	object->owner = SvRV(ref);
+//	printf("Got the lock on %d\n",object);
 	return;
 }
 
@@ -50,10 +55,13 @@ void shared_unlock (SV* ref) {
 		return;
 	}
 	object->locks--;
+//	printf("Decremented lock count for %d\n",object);
 	if(object->locks == 0) {
 		object->owner = NULL;
+//		printf("Release lock for %d\n",object);
 		MUTEX_UNLOCK(&object->lock);
 	}
+
 	return;
 }
 
@@ -63,20 +71,59 @@ void shared_thrcnt_inc (SV* ref) {
 	PERL_SET_CONTEXT(shared_sv_space);
 	shared_lock(ref);
 	SvREFCNT_inc(object->sv);
-/*	printf("threadcount is now %d\n",SvREFCNT(object->sv)); */
+//	printf("threadcount is now up to %d for %d\n",SvREFCNT(object->sv), object);
 	shared_unlock(ref);
 	PERL_SET_CONTEXT(old);
 }
 
 void shared_thrcnt_dec (SV* ref) {
+	PerlInterpreter* old = PERL_GET_CONTEXT;
 	shared_sv* object = GETOBJRV(ref);
+	PERL_SET_CONTEXT(shared_sv_space);
 	shared_lock(ref);
 	if(SvREFCNT(object->sv) == 1) {
+//		printf("Killing object %d\n",object);
+		switch (SvTYPE((SV*)object->sv)) {
+			case SVt_PVMG:
+			case SVt_RV:
+				if(SvROK(object->sv)) {
+					shared_thrcnt_dec(object->sv);
+				}
+			break;
+	   	case SVt_PVAV:
+			{
+				SV **src_ary;
+				SSize_t items = AvFILLp((AV*)object->sv) + 1;
+				src_ary = AvARRAY((AV*)object->sv);
+				while (items-- > 0) {
+					if(SvTYPE(*src_ary)) {
+						shared_thrcnt_dec(sv_2mortal(newRV(*src_ary++)));
+					}
+				}
+			}		
+			break;
+		case SVt_PVHV:
+			{
+				HE* entry;
+				entry = hv_iternext((HV*)object->sv);
+				while(entry)	{
+					shared_thrcnt_dec(sv_2mortal(newRV(hv_iterval((HV*) object->sv, entry))));			
+					entry = hv_iternext((HV*)object->sv);
+				}
+
+			}
+			break;
+		};
+		SvREFCNT_dec(object->sv);
+		shared_unlock(ref);
+		PERL_SET_CONTEXT(old);
+		return;
 	} else {
 	 	SvREFCNT_dec(object->sv);
 	}
-/*	printf("threadcount is now %d\n",SvREFCNT(object->sv)); */
+//	printf("threadcount is now down to %d for %d\n",SvREFCNT(object->sv), object);
 	shared_unlock(ref);
+	PERL_SET_CONTEXT(old);
 }
 
 
@@ -104,72 +151,194 @@ void shared_cond_broadcast (SV* ref) {
 	COND_BROADCAST(&object->cond);
 }
 
+SV*  shared_find_object(SV* ref) {
+	/* Here we tried if we are trying to assing a shared value */
+	MAGIC *mg;
+	SV* sv;
+	if(!SvROK(ref)) {
+		return ref;
+	}
+
+
+	sv = SvRV(ref);	
+	/* this is a reference !*/
+	if((mg = SvTIED_mg(sv, PERL_MAGIC_tied))) {
+		SV* obj = SvTIED_obj(sv, mg);
+		SV* objcopy = newSViv(SvIV(SvRV(obj)));
+		ref = newRV_noinc(objcopy);
+
+
+		return ref;		
+	} else {
+		/* here we should probably autoconvert to shared structure */
+		croak("You cannot assign a non shared reference to a shared array or hash");
+	}
+
+}
+
+SV* shared_attach_object(SV* retval) {
+	shared_sv* object;
+	HV* shared;
+	SV* id;
+	SV* tiedobject;
+	STRLEN length;
+	SV** tiedobject_ = 0;
+	SV* obj = 0;
+
+
+	if(!SvROK(retval)) {
+		return retval;
+	}
+	object = GETOBJRV(retval);
+	shared = get_hv("threads::shared::shared", FALSE);
+	id = newSViv((IV)object);
+	length = sv_len(id);
+	tiedobject_ = hv_fetch(shared, SvPV(id,length), length, 0);
+	if(tiedobject_) {
+		tiedobject = (*tiedobject_);
+		tiedobject = newRV_inc(SvRV(tiedobject));
+	} else {
+		//printf("Not found, we need to make a new object\n");
+		tiedobject = newSV(0);
+	}
+	switch(SvTYPE(object->sv)) {
+		case SVt_PVAV:
+		if(SvTYPE(tiedobject) == SVt_NULL) {
+			SV* weakref;
+			obj = newSVrv(tiedobject, "threads::shared::av");
+			sv_setiv(obj,(IV)object);
+			weakref = newRV(obj);
+			sv_rvweaken(weakref);
+			hv_store(shared, SvPV(id,length), length, weakref, 0);
+			shared_thrcnt_inc(tiedobject);
+		}
+		{
+			AV* array = newAV();
+			sv_magic((SV*)array,tiedobject,PERL_MAGIC_tied,Nullch,0);
+			SvREFCNT_dec(tiedobject);
+			retval = newRV_noinc((SV*)array);
+
+
+		}
+		break;
+		case SVt_PVHV:
+		if(SvTYPE(tiedobject) == SVt_NULL) {
+			SV* weakref;
+			obj = newSVrv(tiedobject, "threads::shared::hv");
+			sv_setiv(obj,(IV)object);
+			weakref = newRV(obj);
+			sv_rvweaken(weakref);
+			hv_store(shared, SvPV(id,length), length, weakref, 0);
+			shared_thrcnt_inc(tiedobject);
+		}
+		{
+			HV* hash = newHV();
+			sv_magic((SV*)hash,tiedobject,PERL_MAGIC_tied,Nullch,0);
+			SvREFCNT_dec(tiedobject);
+			retval = newRV_noinc((SV*)hash);
+
+
+		}
+		break;
+		default:
+
+	};		
+
+	return retval;
+}
+
+
 
 SV* shared_sv_new () {
 	PerlInterpreter *old = PERL_GET_CONTEXT;
 	SV* obj;
 	shared_sv* object;
+
+
+	obj = init_shared_sv();
+	object = GETOBJ(obj);
 	PERL_SET_CONTEXT(shared_sv_space);
-	{
-		obj = init_shared_sv();
-		object = GETOBJ(obj);
-		object->sv = newSVsv((SV*) &PL_sv_undef);		
-	}
+	object->sv = newSVsv((SV*) &PL_sv_undef);		
 	PERL_SET_CONTEXT(old);
 	return obj;
 }
 
-SV* shared_sv_fetch (SV* ref) {
-	shared_sv* object = GETOBJRV(ref);
-	SV* retval;
-	shared_lock(ref);
-	retval = newSVsv(object->sv);
-	shared_unlock(ref);
-	return retval;
+
+
+
+
+I32 shared_sv_fetch (pTHX_ IV ref, SV* sv) {
+	shared_sv* object = (shared_sv*) ref;
+	SV* fakeref = newRV(newSViv((IV)object));
+	SV* tmp;
+	shared_lock(fakeref);
+	tmp = sv_2mortal(newSVsv(object->sv));
+	tmp = shared_attach_object(tmp);
+	sv_setsv(sv,tmp);
+	shared_unlock(fakeref);
+	SvREFCNT_dec(fakeref);
+	return 0;
 }
 
-void shared_sv_store (SV* ref, SV* value) {
-	shared_sv* object = GETOBJRV(ref);
+I32 shared_sv_store (pTHX_ IV ref, SV* sv) {
+	shared_sv* object = (shared_sv*) ref;
+	SV* fakeref = newRV(newSViv((IV)object));
 	PerlInterpreter* old = PERL_GET_CONTEXT;
 	PERL_SET_CONTEXT(shared_sv_space);
-	shared_lock(ref);
-	sv_setsv(object->sv, value);
-	shared_unlock(ref);
+	
+	sv = shared_find_object(sv);
+
+	shared_lock(fakeref);
+	if(SvROK(object->sv)) {
+		shared_thrcnt_dec(object->sv);
+	}	
+
+	sv_setsv(object->sv, sv);
+	if(SvROK(sv)) {
+		shared_thrcnt_inc(sv);
+	}
+	shared_unlock(fakeref);
 	PERL_SET_CONTEXT(old);
+	SvREFCNT_dec(fakeref);
+	return 0;
+}
+
+void shared_sv_attach(SV* ref, SV* sv) {
+	shared_sv* object = GETOBJRV(ref);
+        struct ufuncs uf;
+        uf.uf_val = &shared_sv_fetch;
+ 	uf.uf_set = &shared_sv_store;
+  	uf.uf_index = (IV) object; 
+
+	sv_magic(sv, 0, PERL_MAGIC_uvar, (char*)&uf, sizeof(uf));
+	SvREFCNT_inc(SvRV(ref)); 	
 }
 
 SV* shared_av_new () {
 	PerlInterpreter *old = PERL_GET_CONTEXT;
 	SV* obj;
 	shared_sv* object;
+	obj = init_shared_sv();
+	object = GETOBJ(obj);
 	PERL_SET_CONTEXT(shared_sv_space);
-	{
-		obj = init_shared_sv();
-		object = GETOBJ(obj);
-		object->sv = (SV*) newAV();
-	}
+	object->sv = (SV*) newAV();
 	PERL_SET_CONTEXT(old);
 	return obj;
 }
+
+
 
 void shared_av_store (SV* ref, SV* index, SV* value) {
 	shared_sv* object = GETOBJRV(ref);
 	PerlInterpreter* old = PERL_GET_CONTEXT;
 	SV** av_entry_;
 	SV* av_entry;
-	
+
+
+
 	PERL_SET_CONTEXT(shared_sv_space);	
 
-/*
-	if(SvROK(value)) {
-		printf("this is a ref, we need to share it\n");
-	} else {
-	   	SV* scalar = shared_sv_new();				
-		shared_sv* shared_object = GETOBJ(scalar);
-		shared_object->sv  = newSVsv(value);
-		value = scalar;
-	}	
-*/
+	value = shared_find_object(value);
 
 	shared_lock(ref);
 	av_entry_ = av_fetch((AV*) object->sv, (I32) SvIV(index),0);
@@ -177,13 +346,20 @@ void shared_av_store (SV* ref, SV* index, SV* value) {
 
 	if(av_entry_) {
 		av_entry = (*av_entry_);
+		if(SvROK(GETOBJ(av_entry)->sv)) {
+			shared_thrcnt_dec(GETOBJ(av_entry)->sv);
+		}
 	} else {
 		av_entry = shared_sv_new();
 		av_store((AV*) object->sv, (I32) SvIV(index),av_entry);
 	}	
+	if(SvROK(value)) {
+		shared_thrcnt_inc(value);
+	}
 	sv_setsv(GETOBJ(av_entry)->sv, value);
 	shared_unlock(ref);
 	PERL_SET_CONTEXT(old);
+
 }
 
 SV* shared_av_fetch(SV* ref, SV* index) {
@@ -198,6 +374,9 @@ SV* shared_av_fetch(SV* ref, SV* index) {
 		retval = newSVsv((SV*) &PL_sv_undef);		
 	}	
 	shared_unlock(ref);
+
+	retval = shared_attach_object(retval);
+
 	return retval;
 }
 
@@ -297,7 +476,11 @@ void shared_av_push(SV* ref, AV* param) {
 	i = AvFILLp(param);
 	while (i >= 0) {
 		SV* tmp = shared_sv_new();
-		sv_setsv(GETOBJ(tmp)->sv, svp[i]);		
+		SV* value = shared_find_object(svp[i]);
+		if(SvROK(value)) {
+		 	shared_thrcnt_inc(value);
+		}
+		sv_setsv(GETOBJ(tmp)->sv, value);		
 		av_push((AV*) object->sv, tmp);
 		i--;
 	}	
@@ -320,7 +503,11 @@ void shared_av_unshift(SV* ref, AV* param) {
 			svp = AvARRAY(param);
 		 	while(i < len) {
 				SV* tmp = shared_sv_new();
-				sv_setsv(GETOBJ(tmp)->sv,svp[i]);
+				SV* value = shared_find_object(svp[i]);
+				if(SvROK(value)) {
+		 			shared_thrcnt_inc(value);
+				}
+				sv_setsv(GETOBJ(tmp)->sv,value);
 				av_store((AV*) object->sv, i, tmp);
 				i++;
 			}	
@@ -337,6 +524,7 @@ SV* shared_av_shift(SV* ref) {
 	shared_lock(ref);
 	tmp = av_shift((AV*) object->sv);
 	retval = newSVsv(GETOBJ(tmp)->sv);
+	retval = shared_attach_object(retval);
 	shared_thrcnt_dec(newRV_noinc(tmp));
 	shared_unlock(ref);
 	return retval;
@@ -349,6 +537,7 @@ SV* shared_av_pop(SV* ref) {
 	shared_lock(ref);
 	tmp = av_pop((AV*) object->sv);
 	retval = newSVsv(GETOBJ(tmp)->sv);
+	retval = shared_attach_object(retval);
 	shared_thrcnt_dec(newRV_noinc(tmp));
 	shared_unlock(ref);
 	return retval;
@@ -358,13 +547,15 @@ SV* shared_hv_new () {
 	PerlInterpreter *old = PERL_GET_CONTEXT;
 	SV* obj;
 	shared_sv* object;
+
+
+
+	obj = init_shared_sv();
+	object = GETOBJ(obj);
 	PERL_SET_CONTEXT(shared_sv_space);
-	{
-		obj = init_shared_sv();
-		object = GETOBJ(obj);
-		object->sv = (SV*) newHV();
-	}
+	object->sv = (SV*) newHV();
 	PERL_SET_CONTEXT(old);
+
 	return obj;
 }
 
@@ -384,16 +575,27 @@ void shared_hv_store (SV* ref, SV* key, SV* value) {
 
 	PERL_SET_CONTEXT(shared_sv_space);
 
+
+	value = shared_find_object(value);
+
+
 	hv_entry_ = hv_fetch((HV*) object->sv, ckey,len,0);
 
 	if(hv_entry_) {
 		hv_entry = (*hv_entry_);
+		if(SvROK(GETOBJ(hv_entry)->sv)) {
+			shared_thrcnt_dec(GETOBJ(hv_entry)->sv);
+		}
 	} else {
 		hv_entry = shared_sv_new();
 		hv_store((HV*) object->sv, ckey, len, hv_entry,0);
 	}
+	if(SvROK(value)) {
+		shared_thrcnt_inc(value);
+	}
 	sv_setsv(GETOBJ(hv_entry)->sv, value);
 	shared_unlock(ref);
+
 	PERL_SET_CONTEXT(old);
 }
 
@@ -416,6 +618,8 @@ SV* shared_hv_fetch (SV* ref, SV* key) {
 	}	
 
 	shared_unlock(ref);
+	retval = shared_attach_object(retval);
+
 	return retval;
 }
 
@@ -448,9 +652,12 @@ SV* shared_hv_delete( SV* ref, SV* key) {
 	ckey = SvPV(key, len);
 	shared_lock(ref);
 	tmp = hv_delete((HV*) object->sv, ckey, len,0);
+
 	PERL_SET_CONTEXT(old);
 	if(tmp) {
 		retval = newSVsv(GETOBJ(tmp)->sv);
+		retval = shared_attach_object(retval);
+		shared_thrcnt_dec(sv_2mortal(newRV_noinc(tmp)));
 	} else {
 		retval = newSVsv((SV*) &PL_sv_undef);		
 	}	
@@ -509,9 +716,17 @@ SV* shared_hv_nextkey(SV* ref, SV*key) {
 
 void shared_hv_clear (SV *ref) {
 	shared_sv* object = GETOBJRV(ref);
+	HE* entry;
 	PerlInterpreter *old = PERL_GET_CONTEXT;
 	PERL_SET_CONTEXT(shared_sv_space);
 	shared_lock(ref);
+
+
+	entry = hv_iternext((HV*)object->sv);
+	while(entry)	{
+		shared_thrcnt_dec(sv_2mortal(newRV(hv_iterval((HV*) object->sv, entry))));			
+		entry = hv_iternext((HV*)object->sv);
+	}
 	hv_clear((HV*) object->sv);
 	shared_unlock(ref);
 	PERL_SET_CONTEXT(old);
@@ -590,38 +805,23 @@ MODULE = threads::shared		PACKAGE = threads::shared::sv
 
 
 SV*
-FETCH(ref)
-	SV* ref
-	CODE:
-	RETVAL = shared_sv_fetch(ref);
-	OUTPUT:
-	RETVAL
-
-
-void
-STORE(ref, value)
-	SV* ref
-	SV* value
-	CODE:
-	shared_sv_store(ref,value);
-        XSRETURN_EMPTY;
-       
-	
-
-SV*
-new(class)
-	char* class
+new(..)
 	CODE:
 	RETVAL = shared_sv_new();
 	OUTPUT:
 	RETVAL
 
+void
+attach(obj, sv)
+	SV* obj
+	SV* sv
+	CODE:
+	shared_sv_attach(obj, sv);
 
 MODULE = threads::shared		PACKAGE = threads::shared::av		
 
 SV*
-new(class)
-	char* class
+new(..)
 	CODE:
 	RETVAL = shared_av_new();
 	OUTPUT:
@@ -745,16 +945,14 @@ POP(ref)
 	RETVAL
 
 void
-SPLICE(ref, ...);
-	SV* ref;
+SPLICE(..);
 	CODE:
-	printf("SPLICE IS NOT SUPPORTED\n");
+	printf("SPLICE IS NOT SUPPORTED SHARED ARRAYS\n");
 
 MODULE = threads::shared		PACKAGE = threads::shared::hv		
 
 SV*
-new(class)
-	char* class
+new(..)
 	CODE:
 	RETVAL = shared_hv_new();
 	OUTPUT:

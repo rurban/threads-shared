@@ -1,6 +1,6 @@
 package threads::shared;
 
-use 5.006;
+use 5.7.2;
 use strict;
 use warnings;
 
@@ -11,7 +11,7 @@ use attributes qw(reftype);
 
 use Scalar::Util qw(weaken);
 
-use threads 0.01;
+use threads 0.03;
 
 our @ISA = qw(Exporter DynaLoader);
 
@@ -23,18 +23,33 @@ our @ISA = qw(Exporter DynaLoader);
 # If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
 # will save memory.
 our %EXPORT_TAGS = ( 'all' => [ qw(
-	
+	share lock unlock cond_signal cond_wait cond_broadcast
 ) ] );
 
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
-our @EXPORT = qw(cond_signal cond_wait cond_broadcast lock unlock);
+our @EXPORT = qw(share cond_signal cond_wait cond_broadcast lock unlock);
 	
 use Carp qw(croak);
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 our %shared;
+
+sub share ($) {
+    my $value = shift;
+    my $ref = reftype($value);
+    croak "Need a reference" unless($ref);
+    if($ref eq 'SCALAR') {
+	my $obj = bless \threads::shared::sv->new(),'threads::shared::sv';
+	$obj->attach($$value);
+    } elsif($ref eq 'ARRAY') {
+	tie @$value, 'threads::shared';
+    } elsif($ref eq 'HASH') {
+	tie %$value, 'threads::shared';
+    }
+    return $value;
+}
 
 sub shared_ref ($) {
 	my $value = shift;
@@ -46,50 +61,43 @@ sub shared_ref ($) {
       	}
 	return $value if(UNIVERSAL::isa($value, 'threads::shared'));
 	return tied $$value if($ref eq 'SCALAR' && tied $$value);
+	return tied @$value if($ref eq 'ARRAY' && tied @$value);
 	return undef;
 }
 
-sub lock (\$) {
+sub lock ($) {
 	my $ref = shift;
 	my $self = shared_ref($ref);
 	croak "$ref is not usable" unless($self);
 	$self->_lock();
 }
 
-sub unlock (\$) {
+sub unlock ($) {
 	my $ref = shift;
 	my $self = shared_ref($ref);
 	croak "$ref is not usable" unless($self);
 	$self->_unlock();
 }
 
-sub cond_wait (\$) {
+sub cond_wait ($) {
 	my $ref = shift;
 	my $self = shared_ref($ref);
 	croak "$ref is not usable" unless($self);
 	$self->_cond_wait();
 }
 
-sub cond_broadcast (\$) {
+sub cond_broadcast ($) {
 	my $ref = shift;
 	my $self = shared_ref($ref);
 	croak "$ref is not usable" unless($self);
 	$self->_cond_broadcast();
 }
 
-sub cond_signal (\$) {
+sub cond_signal ($) {
 	my $ref = shift;
 	my $self = shared_ref($ref);
 	croak "$ref is not usable" unless($self);
 	$self->_cond_signal();
-}
-
-sub TIESCALAR {
-	my $class = shift;
-	my $self = bless \threads::shared::sv->new(),'threads::shared::sv';
-	$shared{$self->ptr} = $self;
-	weaken($shared{$self->ptr});
-	return $self;
 }
 
 sub TIEARRAY {
@@ -106,10 +114,11 @@ sub TIEHASH {
 	my $self = bless \threads::shared::hv->new(),'threads::shared::hv';
 	$shared{$self->ptr} = $self;
 	weaken($shared{$self->ptr});
+
+
 	return $self;
 }
 
-use Devel::Peek qw(SvREFCNT SvREFCNT_dec Dump);
 sub CLONE {
 
 	foreach my $ptr (keys %shared) {
@@ -124,6 +133,7 @@ sub DESTROY {
     my $self = shift;
     my $ref = $$self;
     $self->thrcnt_dec();
+    delete($shared{$self->ptr});
 }
 
 package threads::shared::sv;
@@ -138,11 +148,9 @@ use base 'threads::shared';
 
 bootstrap threads::shared $VERSION;
 
-# Preloaded methods go here.
 
 1;
 __END__
-# Below is stub documentation for your module. You better edit it!
 
 =head1 NAME
 
@@ -152,9 +160,12 @@ threads::shared - Perl extension for sharing data structures between threads
 
   use threads::shared;
 
-  tie my %hash  , 'threads::shared';
-  tie my @array , 'threads::shared';
-  tie my $scalar, 'threads::shared';
+  my($foo, @foo, %foo);
+  share(\$foo);
+  share(\@foo);
+  share(\%hash);
+  my $bar = share([]);
+  $hash{bar} = share({});
 
   lock(\%hash);
   unlock(\%hash);
@@ -164,10 +175,11 @@ threads::shared - Perl extension for sharing data structures between threads
 
 =head1 DESCRIPTION
 
+ This modules allows you to share() variables. These variables will then be shared across different threads (and pseudoforks on win32). They are used together with the threads module.
 
 =head2 EXPORT
 
-lock(), unlock(), cond_wait, cond_signal, cond_broadcast
+share(), lock(), unlock(), cond_wait, cond_signal, cond_broadcast
 
 =head1 BUGS
 

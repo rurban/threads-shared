@@ -9,13 +9,18 @@ use ExtUtils::testlib;
 use threads;
 use threads::shared;
 
+use Devel::Peek;
+
 use Test;
 BEGIN { plan tests => 5 };
 
+
+
 sub foo {};
 
-tie my %hash, 'threads::shared';
 
+my %hash;
+share(\%hash);
 ok(1);
 
 my @threads;
@@ -32,7 +37,8 @@ ok($hash{2}, 10000);
 
 
 my $foo;
-tie $foo,'threads::shared';
+share(\$foo);
+
 
 my @threads;
 for my $i (1..5) {
@@ -45,8 +51,9 @@ for(@threads) {
 
 ok($foo, 10000);
 
+
 my @foo;
-tie @foo,'threads::shared';
+share(\@foo);
 
 my @threads;
 for my $i (1..5) {
@@ -59,7 +66,10 @@ for(@threads) {
 ok($foo[4], 10000);
 
 
-
+my $test = share({});
+$test->{hi} = share([]);
+threads->create(sub { $test->{hi}->[0] = share([]); $test->{hi}[0][5] = "yeah"})->join();
+ok($test->{hi}[0][5],"yeah");
 
 
 
