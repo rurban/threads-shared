@@ -1,25 +1,23 @@
+# Module makefile for threads::shared (using ExtUtils::MakeMaker)
+
+require 5.008;
+
+use strict;
+use warnings;
+
 use ExtUtils::MakeMaker;
-# See lib/ExtUtils/MakeMaker.pm for details of how to influence
-# the contents of the Makefile that is written.
-
-use Config;
-
-
-unless($Config{'useithreads'} eq 'define') {
-    die "We need a perl that is built with USEITHREAD!\n";
-}
 
 WriteMakefile(
-    'NAME'		=> 'threads::shared',
-    'VERSION_FROM'	=> 'shared.pm', # finds $VERSION
-    'PREREQ_PM'		=> {threads => 0.03}, # e.g., Module::Name => 1.1
-    ($] >= 5.005 ?    ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM => 'shared.pm', # retrieve abstract from module
-       AUTHOR     => 'A. U. Thor <a.u.thor@a.galaxy.far.far.away>') : ()),
-    'LIBS'		=> [''], # e.g., '-lm'
-    'DEFINE'		=> '', # e.g., '-DHAVE_SOMETHING'
-	# Insert -I. if you add *.h files later:
-    'INC'		=> '', # e.g., '-I/usr/include/other'
-	# Un-comment this if you add C files to link with later:
-    # 'OBJECT'		=> '$(O_FILES)', # link all the C files too
+    'NAME'              => 'threads::shared',
+    'AUTHOR'            => 'Arthur Bergman <arthur AT contiller DOT se>',
+    'VERSION_FROM'      => 'shared.pm',
+    'ABSTRACT_FROM'     => 'shared.pm',
+    'PM' => {
+        'shared.pm'     => '$(INST_LIBDIR)/shared.pm',
+    },
+    'INSTALLDIRS'       => 'perl',
+    ((ExtUtils::MakeMaker->VERSION() > 6.30) ?
+        ('LICENSE'  => 'perl')         : ()),
 );
+
+# EOF
