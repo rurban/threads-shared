@@ -1,10 +1,12 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         threads-shared
-version:      1.01
+version:      1.02
 version_from: shared.pm
 installdirs:  perl
 requires:
+    threads:                       0
+    XSLoader:                      0
 
 distribution_type: module
 generated_by: ExtUtils::MakeMaker version 6.30
