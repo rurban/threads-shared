@@ -115,30 +115,21 @@
  * without the prefix (e.g., sv, tmp or obj).
  */
 
-/* Patch status:
- *
- * Perl 5.8.8 contains threads::shared patches up to 26626 (equivalent to
- * blead patches 26350+26351).
- *
- * The CPAN version of threads::shared contains the following blead patches:
- *      26569 (applicable to 5.9.3 only)
- *      26684
- *      26693
- *      26695
- */
-
 #define PERL_NO_GET_CONTEXT
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
 #ifdef HAS_PPPORT_H
-#define NEED_vnewSVpvf
-#define NEED_warner
+#  define NEED_vnewSVpvf
+#  define NEED_warner
 #  include "ppport.h"
 #  include "shared.h"
 #endif
 
 #ifdef USE_ITHREADS
+
+/* Magic signature(s) for mg_private to make PERL_MAGIC_ext magic safer */
+#define UL_MAGIC_SIG 0x554C  /* UL = user lock */
 
 /*
  * The shared things need an intepreter to live in ...
@@ -350,7 +341,16 @@ S_get_userlock(pTHX_ SV* ssv, bool create)
     /* XXX Redesign the storage of user locks so we don't need a global
      * lock to access them ???? DAPM */
     ENTER_LOCK;
-    mg = mg_find(ssv, PERL_MAGIC_ext);
+
+    /* Version of mg_find that also checks the private signature */
+    for (mg = SvMAGIC(ssv); mg; mg = mg->mg_moremagic) {
+        if ((mg->mg_type == PERL_MAGIC_ext) &&
+            (mg->mg_private == UL_MAGIC_SIG))
+        {
+            break;
+        }
+    }
+
     if (mg) {
         ul = (user_lock*)(mg->mg_ptr);
     } else if (create) {
@@ -359,8 +359,9 @@ S_get_userlock(pTHX_ SV* ssv, bool create)
         ul = (user_lock *) PerlMemShared_malloc(sizeof(user_lock));
         Zero(ul, 1, user_lock);
         /* Attach to shared SV using ext magic */
-        sv_magicext(ssv, NULL, PERL_MAGIC_ext, &sharedsv_userlock_vtbl,
-               (char *)ul, 0);
+        mg = sv_magicext(ssv, NULL, PERL_MAGIC_ext, &sharedsv_userlock_vtbl,
+                            (char *)ul, 0);
+        mg->mg_private = UL_MAGIC_SIG;  /* Set private signature */
         recursive_lock_init(aTHX_ &ul->lock);
         COND_INIT(&ul->user_cond);
         CALLER_CONTEXT;
@@ -562,15 +563,14 @@ S_abs_2_rel_milli(double abs)
 
     /* Get current time (in units of 100 nanoseconds since 1/1/1601) */
     union {
-        FILETIME         ft;
-        unsigned __int64 i64;
+        FILETIME ft;
+        __int64  i64;   /* 'signed' to keep compilers happy */
     } now;
 
     GetSystemTimeAsFileTime(&now.ft);
 
     /* Relative time in milliseconds */
     rel = (abs * 1000.) - (((double)now.i64 / 10000.) - EPOCH_BIAS);
-
     if (rel <= 0.0) {
         return (0);
     }
