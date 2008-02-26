@@ -1,11 +1,11 @@
 --- #YAML:1.0
 name:                threads-shared
-version:             1.17
+version:             1.18
 abstract:            Perl extension for sharing data structures between threads
 license:             perl
 author:              
     - Artur Bergman, Jerry D. Hedden <jdhedden AT cpan DOT org>
-generated_by:        ExtUtils::MakeMaker version 6.42
+generated_by:        ExtUtils::MakeMaker version 6.43_01
 distribution_type:   module
 requires:     
     Carp:                          0
