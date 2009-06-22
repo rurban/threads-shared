@@ -1,5 +1,10 @@
 Revision history for Perl extension threads::shared.
 
+-
+	- Small doc fix
+	- Test file changes for core
+	- Upgraded ppport.h to Devel::PPPort 3.19
+
 1.28 Mon Feb 23 18:46:19 2009
 	- Correct POD wrt lock()
 	- Clarify is_shared($hash{'elem'}) in POD

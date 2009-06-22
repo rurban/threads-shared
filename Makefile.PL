@@ -46,11 +46,7 @@ sub have_cc
 
 # Build options for different environments
 my @conditional_params;
-if (grep { $_ eq 'PERL_CORE=1' } @ARGV) {
-    # Core
-    push(@conditional_params, 'MAN3PODS' => {});
-
-} else {
+if (not grep { $_ eq 'PERL_CORE=1' } @ARGV) {
     # CPAN
 
     # Verify that a 'C' compiler is available
@@ -66,7 +62,7 @@ if (grep { $_ eq 'PERL_CORE=1' } @ARGV) {
                                     'Carp'              => 0,
                                     'XSLoader'          => 0,
                                     'Scalar::Util'      => 0,
-                                    'threads'           => 1.71,
+                                    'threads'           => 1.73,
 
                                     'Test'              => 0,
                                     'Test::More'        => 0,
