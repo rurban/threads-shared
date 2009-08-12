@@ -1,6 +1,9 @@
 Revision history for Perl extension threads::shared.
 
--
+1.31 Mon Aug 10 19:14:35 2009
+	- Handle thread creation failures in tests due to lack of memory, etc.
+
+1.29 Mon Jun 22 08:35:00 2009
 	- Small doc fix
 	- Test file changes for core
 	- Upgraded ppport.h to Devel::PPPort 3.19
