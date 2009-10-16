@@ -1,5 +1,8 @@
 Revision history for Perl extension threads::shared.
 
+1.32 Fri Oct 16 16:31:18 2009
+	- Merge changes from blead (commit 8a8fad9addd88c65ee8b18b0e45b2ed9a18987f8)
+
 1.31 Mon Aug 10 19:14:35 2009
 	- Handle thread creation failures in tests due to lack of memory, etc.
 
