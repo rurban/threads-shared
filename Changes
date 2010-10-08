@@ -1,5 +1,8 @@
 Revision history for Perl extension threads::shared.
 
+1.34 Fri Oct  8 16:48:25 2010
+	- Veto signal dispatch hook (commit 65c7421c80585e0d12a20773935dc01f4ffa3e42)
+
 1.33 Tue Mar  9 14:03:47 EST 2010
 	- Handle shared object reference during global destruction
 	- Document that changing array length via $#array doesn't work
