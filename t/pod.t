@@ -55,5 +55,7 @@ cpan
 CONDVAR
 LOCKVAR
 refcnt
+variable's
+destructor
 
 __END__
