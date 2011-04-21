@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               threads-shared
-version:            1.36
+version:            1.37
 abstract:           Perl extension for sharing data structures between threads
 author:
     - Artur Bergman, Jerry D. Hedden <jdhedden AT cpan DOT org>
