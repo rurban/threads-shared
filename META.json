@@ -36,7 +36,6 @@
             "Config" : "0",
             "ExtUtils::testlib" : "0",
             "Scalar::Util" : "0",
-            "Test" : "0",
             "Test::More" : "0",
             "XSLoader" : "0",
             "strict" : "0",
@@ -46,5 +45,5 @@
       }
    },
    "release_status" : "stable",
-   "version" : "1.51"
+   "version" : "1.52"
 }
