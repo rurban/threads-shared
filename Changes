@@ -1,5 +1,8 @@
 Revision history for Perl extension threads::shared.
 
+1.54 Sat Dec 31 17:33:20 2016
+	- Fix Clang macro
+
 1.53 Fri Dec 30 17:35:13 2016
 	- Sync from blead
 
